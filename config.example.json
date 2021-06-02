@@ -1,0 +1,14 @@
+{
+    "database": {
+        "host": "your-database-host",
+        "user": "your-database-username",
+        "password": "your-database-password",
+        "database": "your-database-name"
+    },
+    "jwt": {
+        "secret": "your-jwt-secret"
+    },
+    "cors": {
+        "origin": "https://your.webpage.host" 
+    }
+}
