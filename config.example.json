@@ -3,7 +3,8 @@
         "host": "your-database-host",
         "user": "your-database-username",
         "password": "your-database-password",
-        "database": "your-database-name"
+        "database": "your-database-name",
+        "timezone": "UTC"
     },
     "jwt": {
         "secret": "your-jwt-secret"

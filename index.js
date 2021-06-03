@@ -24,7 +24,8 @@ async function dbConnect() {
     host: config.database.host,
     user: config.database.user,
     password: config.database.password,
-    database: config.database.database
+    database: config.database.database,
+    timezone: config.database.timezone || 'UTC'
   })
   return connection
 }
@@ -249,6 +250,11 @@ app.delete('/board/:no', async function(req, res) {
     if(rowsSelectId[0].id !== decoded.id){
       throw new Error()
     }
+
+    const [rowsDeleteReply, fieldsDeleteReply] = await connection.execute(
+      'DELETE FROM board_reply WHERE text_no = ?;',
+      [no]
+    )
 
     const [rowsDelete, fieldsDelete] = await connection.execute(
       'DELETE FROM board_text WHERE no = ?;',
