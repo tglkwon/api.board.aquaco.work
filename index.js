@@ -120,10 +120,13 @@ app.get('/board', async function(req, res) {
     
     const connection = await dbConnect()
     const [rowsList, fieldsList] = await connection.execute(
-      `SELECT no, member.nickname, title, wri_date 
+      `SELECT board_text.no, member.nickname, title, wri_date, count(board_reply.no) AS cnt_reply
       FROM board_text
       JOIN member
       ON member.id = board_text.id
+      LEFT JOIN board_reply
+      ON board_text.no = board_reply.text_no
+      GROUP BY board_text.no
       ORDER BY no DESC
       LIMIT ${startNo}, 10;`
     )
