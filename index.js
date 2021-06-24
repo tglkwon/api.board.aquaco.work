@@ -1,397 +1,318 @@
-const express = require('express')
-const cors = require('cors')
-
-const mysql = require('mysql2/promise')
-const bcrypt = require('bcrypt')
-const jwt = require('jsonwebtoken')
-
-const fs = require('fs')
-
-let config
-try {
-  config = JSON.parse(fs.readFileSync('config.json').toString('utf-8'))
-} catch(e) {
-  console.error('Plz set config.json')
-  process.exit(1)
-}
-
+const express = require("express")
 const app = express()
+const mysql = require("mysql2/promise")
+const cors = require("cors")
+const bcrypt = require("bcrypt")
+const jwt = require("jsonwebtoken")
+const fs = require("fs")
+
+const config = JSON.parse(fs.readFileSync("config.json").toString("utf-8")) 
+
 app.use(express.json())
 app.use(cors(config.cors.origin))
 
-async function dbConnect() {
-  const connection = await mysql.createConnection({
-    host: config.database.host,
-    user: config.database.user,
-    password: config.database.password,
-    database: config.database.database,
-    timezone: config.database.timezone || 'UTC'
-  })
-  return connection
-}
-
-function getSecret() {
-  return config.jwt.secret
-}
-
-async function verifyToken(token) {
-  const secret = getSecret()
-  const decoded = await new Promise((resolve, reject) => {
-    jwt.verify(token, secret, {}, (err, decoded) => {
-      if(err) reject(err)
-      resolve(decoded)
+function jwtVerify(token) {
+    return new Promise((resolve, reject) => {
+        jwt.verify(token, config.privateKey, (err, decoded) => {
+            if(err) reject(err)
+            resolve(decoded)
+        })
     })
-  })
-  return decoded
 }
 
-//register
-app.post('/member', async function (req, res) {
-  try {
-    const id = req.body.id
-    const password = req.body.password
-    const nickname = req.body.nickname
-    
-    if(!id || !password || !nickname) {
-      throw new Error()
+// register
+app.post('/member', async (req, res) => {
+    try {
+        const id = req.body.id
+        const password = req.body.password
+        const nickname = req.body.nickname
+        if(!id || !password || !nickname) {
+            throw new Error()
+        }
+
+        //hash password
+        const saltRounds = 10
+        const hash = await bcrypt.hash(password, saltRounds)
+        
+        const connection = await mysql.createConnection(config.dbConnect)
+        const [rows, fields] = await connection.execute(
+            "INSERT INTO member (id, password, nickname) VALUES (?, ?, ?);"
+            , [id, hash, nickname]
+        )
+
+        res.json({ result: true })
+    } catch(e) {
+        res.status(400).json({ result: false })
     }
-    
-    const hash = await bcrypt.hash(password, 11)
-
-    const connection = await dbConnect()
-    const [rows, fields] = await connection.execute(
-      'INSERT INTO member (id, password, nickname) VALUES (?, ?, ?);',
-      [id, hash, nickname]
-    )
-
-    res.json({ success: true })
-  } catch(e) {
-    res.json({ success: false })    
-  }
 })
 
-//login
-app.post('/member/login', async function (req, res) {
-  try {
-    const id = req.body.id
-    const password = req.body.password    
+// login
+app.post('/member/login', async (req, res) => {
+    try {
+        const id = req.body.id
+        const password = req.body.password
 
-    if(!id || !password) {
-      throw new Error()
+        if(!id || !password) {
+            throw new Error()
+        }
+
+        const connection = await mysql.createConnection(config.dbConnect)
+        const [rows, fields] = await connection.execute(
+            "SELECT id, password FROM member WHERE id = ?;", [id])
+
+        const match = await bcrypt.compare(password, rows[0].password)
+        
+        if(id !== rows[0].id || !match) {
+            throw new Error()
+        }
+
+        const token = await new Promise((resolve, reject) => {
+            jwt.sign({ id }, config.privateKey, (err, token) => {
+                if(err) reject(err)
+                resolve(token)
+            })
+        }) 
+        
+        res.json({ result: true, token })
+    } catch(e) {
+        res.json({ result: false })
+        console.error(e)
     }
-
-    const connection = await dbConnect()
-    const [rows, fields] = await connection.execute(
-      'SELECT password, nickname FROM member WHERE id = ?',
-      [id]
-    )
-
-    const result = await bcrypt.compare(password, rows[0].password)
-    if(!result) {
-      throw new Error()
-    }
-
-    const payload = {
-      id,
-      nickname: rows[0].nickname
-    }
-    const secret = getSecret()
-    const token = await new Promise((resolve, reject) => {
-      jwt.sign(payload, secret, {expiresIn: "12h"}, (err, token) => {
-        if(err) reject(err)
-        resolve(token)
-      })
-    })
-
-    res.json({ success: true, token })
-  } catch(e) {
-    res.json({ success: false })   
-  }
 })
-
-//board text list
-app.get('/board', async function(req, res) {
-  try {
-    const token = req.headers.token
-    const decoded = await verifyToken(token)    
-
-    const page = Number(req.query.page) || 1
-    const startNo = (page - 1) * 10
-    
-    const connection = await dbConnect()
-    const [rowsList, fieldsList] = await connection.execute(
-      `SELECT board_text.no, member.nickname, title, wri_date, count(board_reply.no) AS cnt_reply
-      FROM board_text
-      JOIN member
-      ON member.id = board_text.id
-      LEFT JOIN board_reply
-      ON board_text.no = board_reply.text_no
-      GROUP BY board_text.no
-      ORDER BY no DESC
-      LIMIT ${startNo}, 10;`
-    )
-    
-    const [rowsCnt, fieldsCnt] = await connection.execute(
-      `SELECT count(no) AS cnt FROM board_text;`
-    )
-
-    res.json({ success: true, list: rowsList, cntText: rowsCnt[0].cnt })
-  } catch(e) {
-    res.json({ success: false })      
-  }
-})
-
-//board text read
-app.get('/board/:no', async function(req, res) {
-  try {
-    const token = req.headers.token
-    const decoded = await verifyToken(token)    
-
-    const no = req.params.no
-
-    if(!no) {
-      throw new Error()
+// list
+app.get('/list', async (req, res) => {
+    try {
+        const token = req.headers.token
+        
+        await jwtVerify(token)
+        
+        const pageNo = (req.query.pageNo - 1) * 10
+        
+        const connection = await mysql.createConnection(config.dbConnect)
+        const [rows, fields] = await connection.execute(
+            "SELECT title_no, title, member.nickname, board_text.datetime " +
+            "FROM board_text LEFT JOIN member ON member.id = board_text.id " +
+            `ORDER BY title_no DESC LIMIT ${pageNo}, 10;`)
+        //get total number of titles to paginate
+        const [rowsCnt, fieldsCnt] = await connection.execute(
+            "SELECT COUNT(*) as maxTitleNo " +
+            "FROM board_text;")
+            
+        res.json({ result: true, list: rows, maxTitleNo: rowsCnt[0].maxTitleNo })
+    } catch(e) {
+        res.json({ result: false })
+        console.error(e)
     }
+})  
 
-    const connection = await dbConnect()
-    const [rows, fields] = await connection.execute(
-      `SELECT member.nickname, title, body, wri_date 
-      FROM board_text
-      JOIN member
-      ON member.id = board_text.id 
-      WHERE no = ?;`,
-      [no]
-    )
+// read text
+app.get("/board/:titleNo", async (req, res) => {
+    try {
+        const titleNo = req.params.titleNo
 
-    res.json({ success: true, contents: rows[0] })
-  } catch(e) {
-    res.json({ success: false })      
-  }
-})
+        const connection = await mysql.createConnection(config.dbConnect)
+        const [rows, fields] = await connection.execute(
+            "SELECT member.nickname, title, contents, board_text.datetime " +
+            "FROM board_text LEFT JOIN member ON member.id = board_text.id WHERE title_no = ?"
+            , [titleNo])
 
-//board text write
-app.post('/board', async function(req, res) {
-  try {
-    const token = req.headers.token
-    const decoded = await verifyToken(token)
-
-    const title = req.body.title
-    const body = req.body.body
-
-    //파라미터 유효성 검사
-    if(!title || !body) {
-      throw new Error()      
+        res.json({ result: true, read: rows })
+    } catch(e) {
+        res.json({ result: false })
     }
-
-    const connection = await dbConnect()
-    const [rows, fields] = await connection.execute(
-      'INSERT INTO board_text (id, title, body) VALUES (?, ?, ?);',
-      [decoded.id, title, body]
-    )
-
-    res.json({ success: true, no: rows.insertId })
-  } catch(e) {
-    res.json({ success: false })
-  }
 }) 
 
-//board modify
-app.put('/board/:no', async function(req, res) {
-  try {
-    const token = req.headers.token
-    const decoded = await verifyToken(token)
+// write text
+app.post("/board", async (req, res) => {
+    try {
+        const token = req.headers.token
+        const decoded = await jwtVerify(token)
 
-    const no = req.params.no
-    const title = req.body.title
-    const body = req.body.body
+        const title = req.body.title
+        const contents = req.body.contents
 
-    if(!no || !title || !body) {
-      throw new Error()
+        if(!title || !contents) {
+            throw new Error()
+        }
+
+        const connection = await mysql.createConnection(config.dbConnect)
+        const [rows, fields] = await connection.execute(
+            "INSERT INTO board_text (id, title, contents) VALUES (?, ?, ?);"
+            , [decoded.id, title, contents])
+     
+        res.json({ result: true, titleNo: rows.insertId })
+    } catch(e) {
+        res.json({ result: false })
     }
-
-    const connection = await dbConnect()
-
-    const [rowsSelectId, fieldsSelectId] = await connection.execute(
-      'SELECT id FROM board_text WHERE no = ?;',
-      [no]
-    )
-
-    if(rowsSelectId[0].id !== decoded.id){
-      throw new Error()
-    }
-
-    const [rowsUpdate, fieldsUpdate] = await connection.execute(
-      'UPDATE board_text SET title = ?, body = ? WHERE no = ?;',
-      [title, body, no]
-    )
-
-    res.json({ success: true })
-  } catch(e) {
-    res.json({ success: false })
-  }
-})
-
-//board delete
-app.delete('/board/:no', async function(req, res) {
-  try {
-    const token = req.headers.token
-    const decoded = await verifyToken(token)
-
-    const no = req.params.no
-
-    if(!no) {
-      throw new Error()
-    }
-
-    const connection = await dbConnect()
-
-    const [rowsSelectId, fieldsSelectId] = await connection.execute(
-      'SELECT id FROM board_text WHERE no = ?;',
-      [no]
-    )
-
-    if(rowsSelectId[0].id !== decoded.id){
-      throw new Error()
-    }
-
-    const [rowsDeleteReply, fieldsDeleteReply] = await connection.execute(
-      'DELETE FROM board_reply WHERE text_no = ?;',
-      [no]
-    )
-
-    const [rowsDelete, fieldsDelete] = await connection.execute(
-      'DELETE FROM board_text WHERE no = ?;',
-      [no]
-    )
-
-    res.json({ success: true })
-  } catch(e) {
-    res.json({ success: false })
-  }
-})
-
-//board reply list
-app.get('/board/:textNo/reply', async function(req, res) {
-  try {
-    const token = req.headers.token
-    const decoded = await verifyToken(token)
-    
-    const textNo = req.params.textNo
-
-    if(!textNo) {
-      throw new Error()
-    }
-
-    const connection = await dbConnect()
-    const [rows, fields] = await connection.execute(
-      `SELECT no, member.nickname, reply, rep_date 
-      FROM board_reply
-      JOIN member
-      ON member.id = board_reply.id
-      WHERE text_no = ?
-      ORDER BY no ASC;`,
-      [textNo]
-    )
-    
-    res.json({ success: true, list: rows })
-  } catch(e) {
-    res.json({ success: false })      
-  }
-})
-
-//board reply write
-app.post('/board/:textNo/reply', async function(req, res) {
-  try {
-    const token = req.headers.token
-    const decoded = await verifyToken(token)
-
-    const textNo = req.params.textNo
-    const reply = req.body.reply
-
-    //파라미터 유효성 검사
-    if(!reply) {
-      throw new Error()      
-    }
-
-    const connection = await dbConnect()
-    const [rows, fields] = await connection.execute(
-      'INSERT INTO board_reply (text_no, id, reply) VALUES (?, ?, ?);',
-      [textNo, decoded.id, reply]
-    )
-
-    res.json({ success: true, no: rows.insertId })
-  } catch(e) {
-    res.json({ success: false })
-  }
 }) 
 
-//reply modify
-app.put('/board/:textNo/reply/:replyNo', async function(req, res) {
-  try {
-    const token = req.headers.token
-    const decoded = await verifyToken(token)
+// modify text
+app.put("/board/:titleNo", async (req, res) => {
+    try {
+        const titleNo = req.params.titleNo
+        const token = req.headers.token
 
-    const replyNo = req.params.replyNo
-    const reply = req.body.reply
+        const title = req.body.title
+        const contents = req.body.contents
+        
+        if(!title || !contents) {
+            throw new Error()
+        }
 
-    if(!replyNo || !reply) {
-      throw new Error()
+        const decoded = await jwtVerify(token)
+
+        const connection = await mysql.createConnection(config.dbConnect)
+        const [rowsVerify, fieldsVerify] = await connection.execute(
+            "SELECT id FROM board_text WHERE title_no = ?;", [titleNo])
+
+        if(rowsVerify[0].id !== decoded.id) {
+            throw new Error()
+        }
+
+        const [rows, fields] = await connection.execute(
+            "UPDATE board_text SET title = ?, contents = ? WHERE title_no = ?;"
+            , [title, contents, titleNo])
+                    
+        res.json({ result: true, titleNo: rows.insertId })
+    } catch(e) {
+        res.json({ result: false })
     }
+}) 
 
-    const connection = await dbConnect()
+// delete text
+app.delete("/board/:titleNo", async (req, res) => {
+    try {
+        const titleNo = req.params.titleNo
+        const token = req.headers.token
+        
+        if(!titleNo || !token) {
+            throw new Error()
+        }
 
-    const [rowsSelectId, fieldsSelectId] = await connection.execute(
-      'SELECT id FROM board_reply WHERE no = ?;',
-      [replyNo]
-    )
+        const decoded = await jwtVerify(token)
 
-    if(rowsSelectId[0].id !== decoded.id){
-      throw new Error()
+        const connection = await mysql.createConnection(config.dbConnect)
+        const [rowsVerify, fieldsVerify] = await connection.execute(
+            "SELECT id FROM board_text WHERE title_no = ?;", [titleNo])
+
+        if(rowsVerify[0].id !== decoded.id) {
+            throw new Error()
+        }
+
+        const [rowsReply, fieldsReply] = await connection.execute(
+            "DELETE FROM board_reply WHERE title_no = ?;"
+            , [titleNo])
+         
+        const [rowsText, fieldsText] = await connection.execute(
+            "DELETE FROM board_text WHERE title_no = ?;"
+            , [titleNo])
+            
+        res.json({ result: true })
+    } catch(e) {
+        res.json({ result: false })
     }
+}) 
 
-    const [rowsUpdate, fieldsUpdate] = await connection.execute(
-      'UPDATE board_reply SET reply = ? WHERE no = ?;',
-      [reply, replyNo]
-    )
+//read reply
+app.get("/board/:titleNo/reply", async (req, res) => {
+    try {
+        const titleNo = req.params.titleNo
 
-    res.json({ success: true })
-  } catch(e) {
-    res.json({ success: false })
-  }
+        const connection = await mysql.createConnection(config.dbConnect)
+        const [rows, fields] = await connection.execute(
+            "SELECT reply_no, member.nickname, reply, board_reply.datetime " +
+            "FROM board_reply LEFT JOIN member ON member.id = board_reply.id WHERE title_no = ?"
+            , [titleNo])
+
+        res.json({ result: true, reply: rows })
+    } catch(e) {
+        res.json({ result: false })
+    }
+}) 
+
+// write reply
+app.post("/board/:titleNo/reply", async (req, res) => {
+    try {
+        const decoded = await jwtVerify(req.headers.token)
+
+        const titleNo = req.params.titleNo
+        const reply = req.body.reply
+        
+        if(!reply) {
+            throw new Error()
+        }
+        
+        const connection = await mysql.createConnection(config.dbConnect)
+        const [rows, fields] = await connection.execute(
+            "INSERT INTO board_reply (id, reply, title_no) VALUES (?, ?, ?);"
+            , [decoded.id, reply, titleNo])
+            
+        res.json({ result: true })
+    } catch(e) {
+        res.json({ result: false })
+    }
 })
 
-//reply delete
-app.delete('/board/:textNo/reply/:replyNo', async function(req, res) {
-  try {
-    const token = req.headers.token
-    const decoded = await verifyToken(token)
+// modify reply
+app.put("/board/:titleNo/reply/:replyNo", async (req, res) => {
+    try {
+        const replyNo = req.params.replyNo
+        const token = req.headers.token
+        const reply = req.body.reply
+        
+        if(!reply) {
+            throw new Error()
+        }
 
-    const replyNo = req.params.replyNo
-
-    if(!replyNo) {
-      throw new Error()
+        const decoded = await jwtVerify(token)
+        
+        const connection = await mysql.createConnection(config.dbConnect)
+        const [rowsVerify, fieldsVerify] = await connection.execute(
+            "SELECT id FROM board_reply WHERE reply_no = ?;", [replyNo])
+        console.log(3)
+        if(rowsVerify[0].id !== decoded.id) {
+            throw new Error()
+        }
+        
+        const [rows, fields] = await connection.execute(
+            "UPDATE board_reply SET reply = ? WHERE reply_no = ?;"
+            , [reply, replyNo])
+       
+        res.json({ result: true })
+    } catch(e) {
+        res.json({ result: false })
     }
+}) 
 
-    const connection = await dbConnect()
+// delete reply
+app.delete("/board/:titleNo/reply/:replyNo", async (req, res) => {
+    try {
+        const titleNo = req.params.titleNo
+        const replyNo = req.params.replyNo
+        const token = req.headers.token
+        
+        if(!titleNo || !replyNo) {
+            throw new Error()
+        }
 
-    const [rowsSelectId, fieldsSelectId] = await connection.execute(
-      'SELECT id FROM board_reply WHERE no = ?;',
-      [replyNo]
-    )
+        const decoded = await jwtVerify(token)
 
-    if(rowsSelectId[0].id !== decoded.id){
-      throw new Error()
+        const connection = await mysql.createConnection(config.dbConnect)
+        const [rowsVerify, fieldsVerify] = await connection.execute(
+            "SELECT id FROM board_reply WHERE reply_no = ?;", [replyNo])
+        
+        if(rowsVerify[0].id !== decoded.id) {
+            throw new Error()
+        }
+        
+        const [rows, fields] = await connection.execute(
+            "DELETE FROM board_reply WHERE reply_no = ?;"
+            , [replyNo])
+            
+        res.json({ result: true })
+    } catch(e) {
+        res.json({ result: false })
+        console.error(e)
     }
-
-    const [rowsUpdate, fieldsUpdate] = await connection.execute(
-      'DELETE FROM board_reply WHERE no = ?;',
-      [replyNo]
-    )
-
-    res.json({ success: true })
-  } catch(e) {
-    res.json({ success: false })
-  }
-})
-
-app.listen(3031) 
+}) 
+app.listen(3594)

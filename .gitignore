@@ -1,6 +1,3 @@
-#Node Package
 node_modules
 package-lock.json
-
-#Secret
 config.json
