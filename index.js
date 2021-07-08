@@ -27,7 +27,7 @@ app.post('/member', async (req, res) => {
         const password = req.body.password
         const nickname = req.body.nickname
         if(!id || !password || !nickname) {
-            throw new Error()
+            throw new Error("ERR400: 파라미터 부족")
         }
 
         //hash password
@@ -42,7 +42,9 @@ app.post('/member', async (req, res) => {
 
         res.json({ result: true })
     } catch(e) {
-        res.status(400).json({ result: false })
+        const err = e.message || e.toString()
+        const knownErr = err.match(new RegExp('ERR([0-9]{3}): (.*)'))
+        res.status(knownErr[1] || 500).json({ result: false , error: knownErr[2] || err})
     }
 })
 
@@ -53,17 +55,21 @@ app.post('/member/login', async (req, res) => {
         const password = req.body.password
 
         if(!id || !password) {
-            throw new Error()
+            throw new Error("ERR400: 파라미터 부족")
         }
 
         const connection = await mysql.createConnection(config.dbConnect)
         const [rows, fields] = await connection.execute(
             "SELECT id, password FROM member WHERE id = ?;", [id])
+        
+        if(!rows.length) {
+            throw new Error("ERR401: 아이디 없음")
+        }
 
         const match = await bcrypt.compare(password, rows[0].password)
         
         if(id !== rows[0].id || !match) {
-            throw new Error()
+            throw new Error("ERR401: 비밀번호 불일치")
         }
 
         const token = await new Promise((resolve, reject) => {
@@ -75,8 +81,9 @@ app.post('/member/login', async (req, res) => {
         
         res.json({ result: true, token })
     } catch(e) {
-        res.json({ result: false })
-        console.error(e)
+        const err = e.message || e.toString()
+        const knownErr = err.match(new RegExp('ERR([0-9]{3}): (.*)'))
+        res.status(knownErr ? knownErr[1] : 500).json({ result: false , error: knownErr ? knownErr[2] : err})
     }
 })
 // list
@@ -100,8 +107,9 @@ app.get('/list', async (req, res) => {
             
         res.json({ result: true, list: rows, maxTitleNo: rowsCnt[0].maxTitleNo })
     } catch(e) {
-        res.json({ result: false })
-        console.error(e)
+        const err = e.message || e.toString()
+        const knownErr = err.match(new RegExp('ERR([0-9]{3}): (.*)'))
+        res.status(knownErr ? knownErr[1] : 500).json({ result: false , error: knownErr ? knownErr[2] : err})
     }
 })  
 
@@ -118,7 +126,9 @@ app.get("/board/:titleNo", async (req, res) => {
 
         res.json({ result: true, read: rows })
     } catch(e) {
-        res.json({ result: false })
+        const err = e.message || e.toString()
+        const knownErr = err.match(new RegExp('ERR([0-9]{3}): (.*)'))
+        res.status(knownErr ? knownErr[1] : 500).json({ result: false , error: knownErr ? knownErr[2] : err})
     }
 }) 
 
@@ -132,7 +142,7 @@ app.post("/board", async (req, res) => {
         const contents = req.body.contents
 
         if(!title || !contents) {
-            throw new Error()
+            throw new Error("ERR400: 파라미터 부족")
         }
 
         const connection = await mysql.createConnection(config.dbConnect)
@@ -142,7 +152,9 @@ app.post("/board", async (req, res) => {
      
         res.json({ result: true, titleNo: rows.insertId })
     } catch(e) {
-        res.json({ result: false })
+        const err = e.message || e.toString()
+        const knownErr = err.match(new RegExp('ERR([0-9]{3}): (.*)'))
+        res.status(knownErr ? knownErr[1] : 500).json({ result: false , error: knownErr ? knownErr[2] : err})
     }
 }) 
 
@@ -156,7 +168,7 @@ app.put("/board/:titleNo", async (req, res) => {
         const contents = req.body.contents
         
         if(!title || !contents) {
-            throw new Error()
+            throw new Error("ERR400: 파라미터 부족")
         }
 
         const decoded = await jwtVerify(token)
@@ -166,7 +178,7 @@ app.put("/board/:titleNo", async (req, res) => {
             "SELECT id FROM board_text WHERE title_no = ?;", [titleNo])
 
         if(rowsVerify[0].id !== decoded.id) {
-            throw new Error()
+            throw new Error("ERR403: 작성자가 아님")
         }
 
         const [rows, fields] = await connection.execute(
@@ -175,7 +187,9 @@ app.put("/board/:titleNo", async (req, res) => {
                     
         res.json({ result: true, titleNo: rows.insertId })
     } catch(e) {
-        res.json({ result: false })
+        const err = e.message || e.toString()
+        const knownErr = err.match(new RegExp('ERR([0-9]{3}): (.*)'))
+        res.status(knownErr ? knownErr[1] : 500).json({ result: false , error: knownErr ? knownErr[2] : err})
     }
 }) 
 
@@ -186,7 +200,7 @@ app.delete("/board/:titleNo", async (req, res) => {
         const token = req.headers.token
         
         if(!titleNo || !token) {
-            throw new Error()
+            throw new Error("ERR400: 파라미터 부족")
         }
 
         const decoded = await jwtVerify(token)
@@ -196,7 +210,7 @@ app.delete("/board/:titleNo", async (req, res) => {
             "SELECT id FROM board_text WHERE title_no = ?;", [titleNo])
 
         if(rowsVerify[0].id !== decoded.id) {
-            throw new Error()
+            throw new Error("ERR403: 작성자가 아님")
         }
 
         const [rowsReply, fieldsReply] = await connection.execute(
@@ -209,7 +223,9 @@ app.delete("/board/:titleNo", async (req, res) => {
             
         res.json({ result: true })
     } catch(e) {
-        res.json({ result: false })
+        const err = e.message || e.toString()
+        const knownErr = err.match(new RegExp('ERR([0-9]{3}): (.*)'))
+        res.status(knownErr ? knownErr[1] : 500).json({ result: false , error: knownErr ? knownErr[2] : err})
     }
 }) 
 
@@ -217,6 +233,10 @@ app.delete("/board/:titleNo", async (req, res) => {
 app.get("/board/:titleNo/reply", async (req, res) => {
     try {
         const titleNo = req.params.titleNo
+
+        if(!titleNo) {
+            throw new Error("ERR400: 파라미터 부족")
+        }
 
         const connection = await mysql.createConnection(config.dbConnect)
         const [rows, fields] = await connection.execute(
@@ -226,7 +246,9 @@ app.get("/board/:titleNo/reply", async (req, res) => {
 
         res.json({ result: true, reply: rows })
     } catch(e) {
-        res.json({ result: false })
+        const err = e.message || e.toString()
+        const knownErr = err.match(new RegExp('ERR([0-9]{3}): (.*)'))
+        res.status(knownErr ? knownErr[1] : 500).json({ result: false , error: knownErr ? knownErr[2] : err})
     }
 }) 
 
@@ -238,8 +260,8 @@ app.post("/board/:titleNo/reply", async (req, res) => {
         const titleNo = req.params.titleNo
         const reply = req.body.reply
         
-        if(!reply) {
-            throw new Error()
+        if(!reply || !titleNo) {
+            throw new Error("ERR400: 파라미터 부족")
         }
         
         const connection = await mysql.createConnection(config.dbConnect)
@@ -249,7 +271,9 @@ app.post("/board/:titleNo/reply", async (req, res) => {
             
         res.json({ result: true })
     } catch(e) {
-        res.json({ result: false })
+        const err = e.message || e.toString()
+        const knownErr = err.match(new RegExp('ERR([0-9]{3}): (.*)'))
+        res.status(knownErr ? knownErr[1] : 500).json({ result: false , error: knownErr ? knownErr[2] : err})
     }
 })
 
@@ -260,8 +284,8 @@ app.put("/board/:titleNo/reply/:replyNo", async (req, res) => {
         const token = req.headers.token
         const reply = req.body.reply
         
-        if(!reply) {
-            throw new Error()
+        if(!reply || !replyNo) {
+            throw new Error("ERR400: 파라미터 부족")
         }
 
         const decoded = await jwtVerify(token)
@@ -269,9 +293,9 @@ app.put("/board/:titleNo/reply/:replyNo", async (req, res) => {
         const connection = await mysql.createConnection(config.dbConnect)
         const [rowsVerify, fieldsVerify] = await connection.execute(
             "SELECT id FROM board_reply WHERE reply_no = ?;", [replyNo])
-        console.log(3)
+
         if(rowsVerify[0].id !== decoded.id) {
-            throw new Error()
+            throw new Error("ERR403: 작성자가 아님")
         }
         
         const [rows, fields] = await connection.execute(
@@ -280,7 +304,9 @@ app.put("/board/:titleNo/reply/:replyNo", async (req, res) => {
        
         res.json({ result: true })
     } catch(e) {
-        res.json({ result: false })
+        const err = e.message || e.toString()
+        const knownErr = err.match(new RegExp('ERR([0-9]{3}): (.*)'))
+        res.status(knownErr ? knownErr[1] : 500).json({ result: false , error: knownErr ? knownErr[2] : err})
     }
 }) 
 
@@ -292,7 +318,7 @@ app.delete("/board/:titleNo/reply/:replyNo", async (req, res) => {
         const token = req.headers.token
         
         if(!titleNo || !replyNo) {
-            throw new Error()
+            throw new Error("ERR400: 파라미터 부족")
         }
 
         const decoded = await jwtVerify(token)
@@ -302,7 +328,7 @@ app.delete("/board/:titleNo/reply/:replyNo", async (req, res) => {
             "SELECT id FROM board_reply WHERE reply_no = ?;", [replyNo])
         
         if(rowsVerify[0].id !== decoded.id) {
-            throw new Error()
+            throw new Error("ERR403: 작성자가 아님")
         }
         
         const [rows, fields] = await connection.execute(
@@ -311,8 +337,9 @@ app.delete("/board/:titleNo/reply/:replyNo", async (req, res) => {
             
         res.json({ result: true })
     } catch(e) {
-        res.json({ result: false })
-        console.error(e)
+        const err = e.message || e.toString()
+        const knownErr = err.match(new RegExp('ERR([0-9]{3}): (.*)'))
+        res.status(knownErr ? knownErr[1] : 500).json({ result: false , error: knownErr ? knownErr[2] : err})
     }
 }) 
 app.listen(3594)
