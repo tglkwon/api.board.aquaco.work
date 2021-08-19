@@ -1,5 +1,4 @@
 const express = require("express")
-const app = express()
 const mysql = require("mysql2/promise")
 const cors = require("cors")
 const bcrypt = require("bcrypt")
@@ -8,6 +7,7 @@ const fs = require("fs")
 
 const config = JSON.parse(fs.readFileSync("config.json").toString("utf-8")) 
 
+const app = express()
 app.use(express.json())
 app.use(cors(config.cors.origin))
 
@@ -96,14 +96,16 @@ app.get('/list', async (req, res) => {
         const pageNo = (req.query.pageNo - 1) * 10
         
         const connection = await mysql.createConnection(config.dbConnect)
-        const [rows, fields] = await connection.execute(
-            "SELECT title_no, title, member.nickname, board_text.datetime " +
-            "FROM board_text LEFT JOIN member ON member.id = board_text.id " +
-            `ORDER BY title_no DESC LIMIT ${pageNo}, 10;`)
+        const [rows, fields] = await connection.execute(`
+            SELECT title_no, title, member.nickname, board_text.datetime
+            FROM board_text LEFT JOIN member ON member.id = board_text.id
+            ORDER BY title_no DESC LIMIT ${pageNo}, 10;
+        `)
         //get total number of titles to paginate
-        const [rowsCnt, fieldsCnt] = await connection.execute(
-            "SELECT COUNT(*) as maxTitleNo " +
-            "FROM board_text;")
+        const [rowsCnt, fieldsCnt] = await connection.execute(`
+            SELECT COUNT(*) as maxTitleNo
+            FROM board_text;
+        `)
             
         res.json({ result: true, list: rows, maxTitleNo: rowsCnt[0].maxTitleNo })
     } catch(e) {
