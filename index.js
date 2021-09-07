@@ -13,7 +13,7 @@ app.use(cors(config.cors.origin))
 
 function jwtVerify(token) {
     return new Promise((resolve, reject) => {
-        jwt.verify(token, config.privateKey, (err, decoded) => {
+        jwt.verify(token, config.jwtPrivateKey, (err, decoded) => {
             if(err) reject(err)
             resolve(decoded)
         })
@@ -26,13 +26,12 @@ app.post('/member', async (req, res) => {
         const id = req.body.id
         const password = req.body.password
         const nickname = req.body.nickname
+
         if(!id || !password || !nickname) {
             throw new Error("ERR400: 파라미터 부족")
         }
 
-        //hash password
-        const saltRounds = 10
-        const hash = await bcrypt.hash(password, saltRounds)
+        const hash = await bcrypt.hash(password, 10)
         
         const connection = await mysql.createConnection(config.dbConnect)
         const [rows, fields] = await connection.execute(
@@ -44,6 +43,7 @@ app.post('/member', async (req, res) => {
     } catch(e) {
         const err = e.message || e.toString()
         const knownErr = err.match(new RegExp('ERR([0-9]{3}): (.*)'))
+        console.error(e)
         res.status(knownErr[1] || 500).json({ result: false , error: knownErr[2] || err})
     }
 })
@@ -73,7 +73,7 @@ app.post('/member/login', async (req, res) => {
         }
 
         const token = await new Promise((resolve, reject) => {
-            jwt.sign({ id }, config.privateKey, (err, token) => {
+            jwt.sign({ id }, config.jwtPrivateKey, (err, token) => {
                 if(err) reject(err)
                 resolve(token)
             })
@@ -83,6 +83,7 @@ app.post('/member/login', async (req, res) => {
     } catch(e) {
         const err = e.message || e.toString()
         const knownErr = err.match(new RegExp('ERR([0-9]{3}): (.*)'))
+        console.error(e)
         res.status(knownErr ? knownErr[1] : 500).json({ result: false , error: knownErr ? knownErr[2] : err})
     }
 })
